@@ -1,0 +1,918 @@
+import { useState, useEffect, useRef } from "react";
+
+const FONT = "'Outfit', sans-serif";
+
+const COLORS = [
+  { bg: "#F5E9D0", text: "#3A2E1A", accent: "#C4962A" },
+  { bg: "#D4E4F0", text: "#1A2C3A", accent: "#2A6EA6" },
+  { bg: "#EED4D4", text: "#3A1A1A", accent: "#A63030" },
+  { bg: "#D4EDD4", text: "#1A3A1A", accent: "#2A7A2A" },
+  { bg: "#E2D4EE", text: "#2A1A3A", accent: "#6A3AA6" },
+  { bg: "#D4EDE6", text: "#1A3A30", accent: "#2A9A70" },
+];
+
+const EMPTY = (id, name, ci) => ({
+  id, name, colorIndex: ci,
+  address: "", calendar: "", notes: "",
+  elapsedMs: 0, sessions: [], rate: "",
+  estHours: "", jobTasks: [],
+  materials: [],
+  importantItems: [],
+  photos: [],
+  doneItems: [],
+  projectDone: false, doneDate: "", priority: false,
+});
+
+function calcProgress(proj) {
+  const tasks = proj.jobTasks || [];
+  const taskPct = tasks.length > 0 ? (tasks.filter(t => t.done).length / tasks.length) * 100 : null;
+  const estMs = parseFloat(proj.estHours || 0) * 3600000;
+  const timePct = estMs > 0 ? Math.min((proj.elapsedMs / estMs) * 100, 100) : null;
+  if (taskPct !== null && timePct !== null) return Math.round((taskPct + timePct) / 2);
+  if (taskPct !== null) return Math.round(taskPct);
+  if (timePct !== null) return Math.round(timePct);
+  return 0;
+}
+
+const DEFAULTS = [
+  EMPTY(1,"Jose",0), EMPTY(2,"JuJu",1), EMPTY(3,"Brian",2),
+  EMPTY(4,"Kathy",3), EMPTY(5,"Anish",4), EMPTY(6,"Jinu",5),
+];
+
+/* ── Format ms to HH:MM:SS ── */
+function fmt(ms) {
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return [h, m, sec].map(n => String(n).padStart(2, "0")).join(":");
+}
+
+/* ── Toggle ── */
+function Toggle({ on, accent, onChange }) {
+  return (
+    <div onClick={onChange} style={{ cursor: "pointer", userSelect: "none" }}>
+      <div style={{ width: 38, height: 22, borderRadius: 11, background: on ? accent : "rgba(0,0,0,0.12)", position: "relative", transition: "background 0.25s" }}>
+        <div style={{ width: 16, height: 16, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: on ? 19 : 3, transition: "left 0.25s", boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }} />
+      </div>
+    </div>
+  );
+}
+
+/* ── Section Row ── */
+function Section({ label, accent, textColor, open, onToggle, right, children }) {
+  return (
+    <div style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+      <div
+        onClick={onToggle}
+        style={{ display: "flex", alignItems: "center", padding: "16px 0", cursor: "pointer", userSelect: "none" }}
+      >
+        <span style={{ width: 90, fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, fontWeight: 400, flexShrink: 0 }}>{label}</span>
+        <div style={{ flex: 1 }}>{right}</div>
+        <span style={{ fontSize: 12, color: "rgba(0,0,0,0.2)", transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", marginLeft: 8 }}>▾</span>
+      </div>
+      {open && (
+        <div style={{ paddingBottom: 16, animation: "expand 0.2s ease" }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Stopwatch with session log + earnings ── */
+function Stopwatch({ elapsedMs, sessions, rate, accent, textColor, onSave }) {
+  const [running, setRunning] = useState(false);
+  const [current, setCurrent] = useState(0); // current session ms
+  const startRef = useRef(null);
+  const rafRef = useRef(null);
+
+  function tick() {
+    setCurrent(Date.now() - startRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+  }
+
+  function start() {
+    startRef.current = Date.now();
+    setRunning(true);
+    rafRef.current = requestAnimationFrame(tick);
+  }
+
+  function pause() {
+    cancelAnimationFrame(rafRef.current);
+    const sessionMs = Date.now() - startRef.current;
+    if (sessionMs < 1000) { setRunning(false); setCurrent(0); return; }
+    const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const newSession = { id: Date.now(), date: today, ms: sessionMs };
+    const newSessions = [...(sessions || []), newSession];
+    const newTotal = (elapsedMs || 0) + sessionMs;
+    onSave({ elapsedMs: newTotal, sessions: newSessions });
+    setCurrent(0);
+    setRunning(false);
+  }
+
+  function removeSession(id) {
+    const updated = (sessions || []).filter(s => s.id !== id);
+    const newTotal = updated.reduce((acc, s) => acc + s.ms, 0);
+    onSave({ elapsedMs: newTotal, sessions: updated });
+  }
+
+  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
+
+  const displayMs = running ? current : 0;
+  const h = Math.floor(displayMs / 3600000);
+  const m = Math.floor((displayMs % 3600000) / 60000);
+  const s = Math.floor((displayMs % 60000) / 1000);
+
+  const totalHrs = (elapsedMs || 0) / 3600000;
+  const earnings = rate ? (totalHrs * parseFloat(rate || 0)) : 0;
+
+  return (
+    <div style={{ paddingTop: 4 }}>
+
+      {/* Live clock — shows current session only */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 2, marginBottom: 6 }}>
+        {[{val: h, label:"hr"},{val: m, label:"min"},{val: s, label:"sec"}].map(({val, label}, i) => (
+          <div key={label} style={{ display: "flex", alignItems: "baseline", gap: 2 }}>
+            {i > 0 && <span style={{ fontSize: 24, fontWeight: 200, color: "rgba(0,0,0,0.15)", margin: "0 2px" }}>:</span>}
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 44, fontWeight: 600, color: running ? textColor : "rgba(0,0,0,0.15)", lineHeight: 1, letterSpacing: -2, fontVariantNumeric: "tabular-nums", transition: "color 0.3s" }}>
+                {String(val).padStart(2, "0")}
+              </div>
+              <div style={{ fontSize: 7, letterSpacing: 3, textTransform: "uppercase", color: accent, marginTop: 2 }}>{label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {running && (
+        <div style={{ fontSize: 9, color: accent, letterSpacing: 2, textTransform: "uppercase", marginBottom: 12 }}>● Recording session...</div>
+      )}
+
+      {/* Controls */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+        <button onClick={running ? pause : start} style={{
+          flex: 1, padding: "11px 0", borderRadius: 10, border: "none",
+          background: running ? accent : "rgba(0,0,0,0.08)",
+          color: running ? "#fff" : textColor, fontSize: 10, fontWeight: 500,
+          fontFamily: FONT, letterSpacing: 2, textTransform: "uppercase", cursor: "pointer", transition: "all 0.2s"
+        }}>
+          {running ? "Stop & Save" : "Start Session"}
+        </button>
+      </div>
+
+      {/* Rate input */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(0,0,0,0.05)", borderRadius: 10, marginBottom: 20 }}>
+        <span style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, whiteSpace: "nowrap" }}>$/hr</span>
+        <input
+          type="number"
+          value={rate || ""}
+          onChange={e => onSave({ rate: e.target.value })}
+          placeholder="0.00"
+          style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: textColor, fontSize: 16, fontWeight: 400, fontFamily: FONT, padding: 0 }}
+        />
+        {earnings > 0 && (
+          <span style={{ fontSize: 14, fontWeight: 500, color: accent, whiteSpace: "nowrap" }}>
+            = ${earnings.toFixed(2)}
+          </span>
+        )}
+      </div>
+
+      {/* Total summary */}
+      {(elapsedMs || 0) > 0 && (
+        <div style={{ padding: "14px 16px", background: accent + "18", borderRadius: 12, marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, marginBottom: 4 }}>Total Time</div>
+              <div style={{ fontSize: 22, fontWeight: 600, color: textColor, letterSpacing: -0.5 }}>{fmt(elapsedMs)}</div>
+              <div style={{ fontSize: 11, fontWeight: 300, color: "rgba(0,0,0,0.4)", marginTop: 2 }}>
+                {totalHrs.toFixed(1)} hrs · {(sessions||[]).length} session{(sessions||[]).length !== 1 ? "s" : ""}
+              </div>
+            </div>
+            {earnings > 0 && (
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, marginBottom: 4 }}>Earnings</div>
+                <div style={{ fontSize: 22, fontWeight: 600, color: accent }}>${earnings.toFixed(2)}</div>
+                <div style={{ fontSize: 11, fontWeight: 300, color: "rgba(0,0,0,0.4)", marginTop: 2 }}>${parseFloat(rate).toFixed(0)}/hr</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Session log */}
+      {(sessions || []).length > 0 && (
+        <div>
+          <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, marginBottom: 10 }}>Session Log</div>
+          {[...(sessions || [])].reverse().map((sess, i) => (
+            <div key={sess.id} style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "10px 0", borderBottom: "1px solid rgba(0,0,0,0.05)"
+            }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 400, color: textColor }}>{sess.date}</div>
+                <div style={{ fontSize: 10, fontWeight: 300, color: "rgba(0,0,0,0.35)", marginTop: 2 }}>{fmt(sess.ms)}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {rate && (
+                  <span style={{ fontSize: 12, fontWeight: 400, color: accent }}>
+                    ${((sess.ms / 3600000) * parseFloat(rate)).toFixed(2)}
+                  </span>
+                )}
+                <span onClick={() => removeSession(sess.id)} style={{ fontSize: 16, color: "rgba(0,0,0,0.15)", cursor: "pointer" }}>×</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  const [projects, setProjects] = useState(DEFAULTS);
+  const [active, setActive] = useState(null);
+  const [open, setOpen] = useState({});
+  const [editName, setEditName] = useState(false);
+  const [tmpName, setTmpName] = useState("");
+  const [waitingOpen, setWaitingOpen] = useState(false);
+  const [sortMode, setSortMode] = useState("added");
+  const [completedCount, setCompletedCount] = useState(() => {
+    try { return parseInt(localStorage.getItem("lf-completed") || "0"); } catch { return 0; }
+  });
+  const [newMat, setNewMat] = useState("");
+  const [newImp, setNewImp] = useState("");
+  const [newDone, setNewDone] = useState("");
+  const [newTask, setNewTask] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("lf-v4");
+      if (saved) setProjects(JSON.parse(saved));
+    } catch {}
+    setLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (loaded) {
+      try { localStorage.setItem("lf-v4", JSON.stringify(projects)); } catch {}
+    }
+  }, [projects, loaded]);
+
+  const p = active ? projects.find(x => x.id === active) : null;
+  const C = p ? COLORS[p.colorIndex % COLORS.length] : null;
+
+  function upd(key, val) {
+    // If marking projectDone true for the first time, increment counter
+    if (key === "projectDone" && val === true) {
+      const current = projects.find(x => x.id === active);
+      if (current && !current.projectDone) {
+        const newCount = completedCount + 1;
+        setCompletedCount(newCount);
+        try { localStorage.setItem("lf-completed", String(newCount)); } catch {}
+      }
+    }
+    setProjects(ps => ps.map(x => x.id !== active ? x : { ...x, [key]: val }));
+  }
+
+  function tog(section) {
+    setOpen(o => ({ ...o, [section]: !o[section] }));
+  }
+
+  function addMaterial() {
+    if (!newMat.trim()) return;
+    upd("materials", [...(p.materials || []), { id: Date.now(), text: newMat.trim(), checked: false }]);
+    setNewMat("");
+  }
+
+  function toggleMat(id) {
+    upd("materials", p.materials.map(m => m.id === id ? { ...m, checked: !m.checked } : m));
+  }
+
+  function removeMat(id) {
+    upd("materials", p.materials.filter(m => m.id !== id));
+  }
+
+  function addImp() {
+    if (!newImp.trim()) return;
+    upd("importantItems", [...(p.importantItems || []), { id: Date.now(), text: newImp.trim() }]);
+    setNewImp("");
+  }
+
+  function removeImp(id) {
+    upd("importantItems", (p.importantItems || []).filter(x => x.id !== id));
+  }
+
+  function addDoneItem() {
+    if (!newDone.trim()) return;
+    const item = { id: Date.now(), text: newDone.trim(), date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }) };
+    upd("doneItems", [...(p.doneItems || []), item]);
+    setNewDone("");
+  }
+
+  function removeDoneItem(id) {
+    upd("doneItems", (p.doneItems || []).filter(x => x.id !== id));
+  }
+
+  function addTask() {
+    if (!newTask.trim()) return;
+    upd("jobTasks", [...(p.jobTasks || []), { id: Date.now(), text: newTask.trim(), done: false }]);
+    setNewTask("");
+  }
+
+  function toggleTask(id) {
+    upd("jobTasks", (p.jobTasks || []).map(t => t.id === id ? { ...t, done: !t.done } : t));
+  }
+
+  function removeTask(id) {
+    upd("jobTasks", (p.jobTasks || []).filter(t => t.id !== id));
+  }
+
+  function handlePhoto(e) {
+    const files = Array.from(e.target.files);
+    files.forEach(file => {
+      if (file.size > 800000) return; // skip >800KB
+      const reader = new FileReader();
+      reader.onload = ev => {
+        upd("photos", [...(p.photos || []), { id: Date.now(), src: ev.target.result, name: file.name }]);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function addNew() {
+    const ci = projects.length % COLORS.length;
+    const n = EMPTY(Date.now(), "New", ci);
+    setProjects(ps => [...ps, n]);
+    setActive(n.id);
+    setOpen({});
+  }
+
+  function remove(id) {
+    setProjects(ps => ps.filter(x => x.id !== id));
+    setActive(null);
+  }
+
+  const bgColor = C ? C.bg : "#F8F5F0";
+
+  const sortedProjects = [...projects].sort((a, b) => {
+    if (sortMode === "priority") {
+      if (a.priority && !b.priority) return -1;
+      if (!a.priority && b.priority) return 1;
+      return 0;
+    }
+    if (sortMode === "progress") {
+      return calcProgress(b) - calcProgress(a);
+    }
+    return 0; // added = original order
+  });
+
+  return (
+    <div style={{ minHeight: "100vh", background: bgColor, fontFamily: FONT, display: "flex", transition: "background 0.45s ease" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600&display=swap" rel="stylesheet" />
+
+      {/* ── MAIN ── */}
+      <div style={{ flex: 1, marginRight: 48, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+
+        {/* Top bar */}
+        <div style={{ padding: "28px 32px 0", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+          {p && <button onClick={() => remove(p.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: "rgba(0,0,0,0.2)", fontFamily: FONT, padding: 0 }}>Remove</button>}
+        </div>
+
+        {!p ? (
+          <div style={{ flex: 1 }} />
+        ) : (
+          <div key={p.id} style={{ flex: 1, overflowY: "auto", padding: "0 32px 80px", animation: "appear 0.3s ease" }}>
+
+            {/* Name */}
+            <div style={{ marginTop: 48, marginBottom: 40 }}>
+              {editName ? (
+                <input autoFocus value={tmpName} onChange={e => setTmpName(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { upd("name", tmpName.trim() || p.name); setEditName(false); } if (e.key === "Escape") setEditName(false); }}
+                  onBlur={() => { upd("name", tmpName.trim() || p.name); setEditName(false); }}
+                  style={{ background: "transparent", border: "none", borderBottom: `1px solid ${C.accent}`, color: C.text, fontSize: 42, fontWeight: 600, fontFamily: FONT, outline: "none", width: "80%", padding: "2px 0", letterSpacing: -1 }}
+                />
+              ) : (
+                <div onClick={() => { setEditName(true); setTmpName(p.name); }}
+                  style={{ cursor: "text", display: "flex", alignItems: "baseline", lineHeight: 1 }}>
+                  {/* Big first letter */}
+                  <span style={{
+                    fontSize: 96, fontWeight: 700, color: C.text,
+                    letterSpacing: -4, lineHeight: 0.85,
+                    marginRight: 6, flexShrink: 0,
+                    fontFamily: FONT,
+                  }}>
+                    {p.name[0]}
+                  </span>
+                  {/* Rest of name */}
+                  <span style={{
+                    fontSize: 18, fontWeight: 300, color: C.text,
+                    letterSpacing: 4, textTransform: "uppercase",
+                    opacity: 0.65, alignSelf: "flex-end",
+                    paddingBottom: 10,
+                    fontFamily: FONT,
+                  }}>
+                    {p.name.slice(1)}
+                  </span>
+                </div>
+              )}
+              <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: C.accent, fontWeight: 300 }}>
+                  {p.projectDone ? "✓ Complete" : (p.importantItems||[]).length > 0 ? "⚑ Has notes" : "Active"}
+                </div>
+                <button
+                  onClick={() => upd("priority", !p.priority)}
+                  style={{
+                    background: p.priority ? C.accent + "22" : "transparent",
+                    border: `1px solid ${p.priority ? C.accent : "rgba(0,0,0,0.12)"}`,
+                    borderRadius: 6, padding: "2px 8px", cursor: "pointer",
+                    fontSize: 9, letterSpacing: 2, textTransform: "uppercase",
+                    color: p.priority ? C.accent : "rgba(0,0,0,0.25)", fontFamily: FONT,
+                    transition: "all 0.2s"
+                  }}>
+                  {p.priority ? "⚑ Priority" : "Set Priority"}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ height: 1, background: "rgba(0,0,0,0.07)", marginBottom: 4 }} />
+
+            {/* ── PROGRESS ── */}
+            {(() => {
+              const tasks = p.jobTasks || [];
+              const doneTasks = tasks.filter(t => t.done).length;
+              const taskPct = tasks.length > 0 ? Math.round((doneTasks / tasks.length) * 100) : null;
+              const estMs = parseFloat(p.estHours || 0) * 3600000;
+              const timePct = estMs > 0 ? Math.min(Math.round((p.elapsedMs / estMs) * 100), 100) : null;
+              const combined = calcProgress(p);
+              return (
+                <Section label="Progress" accent={C.accent} textColor={C.text}
+                  open={open.progress} onToggle={() => tog("progress")}
+                  right={
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 60, height: 4, borderRadius: 2, background: "rgba(0,0,0,0.08)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${combined}%`, background: combined === 100 ? "#4AB069" : "#50B464", borderRadius: 2, transition: "width 0.5s ease" }} />
+                      </div>
+                      <span style={{ fontSize: 13, fontWeight: 400, color: combined > 0 ? "#4AB069" : "rgba(0,0,0,0.2)", minWidth: 32 }}>{combined}%</span>
+                    </div>
+                  }
+                >
+                  <div>
+                    {/* Estimated hours */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, padding: "10px 12px", background: "rgba(0,0,0,0.04)", borderRadius: 10 }}>
+                      <span style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: C.accent, whiteSpace: "nowrap" }}>Est. Hours</span>
+                      <input type="number" value={p.estHours || ""} onChange={e => upd("estHours", e.target.value)} placeholder="0"
+                        style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.text, fontSize: 15, fontWeight: 400, fontFamily: FONT, padding: 0 }} />
+                      {timePct !== null && (
+                        <span style={{ fontSize: 12, fontWeight: 500, color: "#4AB069", whiteSpace: "nowrap" }}>{timePct}% by time</span>
+                      )}
+                    </div>
+
+                    {/* Combined visual */}
+                    {(taskPct !== null || timePct !== null) && (
+                      <div style={{ marginBottom: 20 }}>
+                        {taskPct !== null && timePct !== null && (
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+                            {[
+                              { label: "Tasks", pct: taskPct, sub: `${doneTasks}/${tasks.length} done` },
+                              { label: "Time",  pct: timePct,  sub: `${(p.elapsedMs/3600000).toFixed(1)} / ${p.estHours} hrs` },
+                            ].map(({ label, pct, sub }) => (
+                              <div key={label} style={{ padding: "12px 14px", background: "rgba(0,0,0,0.04)", borderRadius: 12 }}>
+                                <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: C.accent, marginBottom: 8 }}>{label}</div>
+                                <div style={{ fontSize: 26, fontWeight: 600, color: "#4AB069", letterSpacing: -1 }}>{pct}%</div>
+                                <div style={{ fontSize: 10, fontWeight: 300, color: "rgba(0,0,0,0.35)", marginTop: 2 }}>{sub}</div>
+                                <div style={{ marginTop: 8, height: 3, background: "rgba(0,0,0,0.08)", borderRadius: 2 }}>
+                                  <div style={{ height: "100%", width: `${pct}%`, background: "#4AB069", borderRadius: 2, transition: "width 0.5s ease" }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ padding: "12px 16px", background: "#4AB06918", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <div>
+                            <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: "#4AB069", marginBottom: 4 }}>Overall</div>
+                            <div style={{ fontSize: 32, fontWeight: 700, color: "#4AB069", letterSpacing: -1 }}>{combined}%</div>
+                          </div>
+                          <div style={{ width: 48, height: 48, borderRadius: "50%", border: "3px solid #4AB06940", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+                            <svg width="48" height="48" style={{ position: "absolute", top: -3, left: -3, transform: "rotate(-90deg)" }}>
+                              <circle cx="27" cy="27" r="21" fill="none" stroke="#4AB069" strokeWidth="3"
+                                strokeDasharray={`${2 * Math.PI * 21}`}
+                                strokeDashoffset={`${2 * Math.PI * 21 * (1 - combined / 100)}`}
+                                strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.6s ease" }} />
+                            </svg>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: "#4AB069" }}>{combined}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Task checklist */}
+                    <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: C.accent, marginBottom: 10 }}>Job Tasks</div>
+                    {tasks.map(t => (
+                      <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                        <div onClick={() => toggleTask(t.id)} style={{
+                          width: 18, height: 18, borderRadius: 4, flexShrink: 0, cursor: "pointer",
+                          border: `1.5px solid ${t.done ? "#4AB069" : "rgba(0,0,0,0.2)"}`,
+                          background: t.done ? "#4AB069" : "transparent",
+                          display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s"
+                        }}>
+                          {t.done && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                        </div>
+                        <span style={{ flex: 1, fontSize: 13, fontWeight: 300, color: t.done ? "rgba(0,0,0,0.3)" : C.text, textDecoration: t.done ? "line-through" : "none" }}>{t.text}</span>
+                        <span onClick={() => removeTask(t.id)} style={{ fontSize: 16, color: "rgba(0,0,0,0.15)", cursor: "pointer", lineHeight: 1 }}>×</span>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                      <input value={newTask} onChange={e => setNewTask(e.target.value)} onKeyDown={e => e.key === "Enter" && addTask()} placeholder="Add task..."
+                        style={{ flex: 1, background: "rgba(0,0,0,0.05)", border: "none", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontWeight: 300, fontFamily: FONT, color: C.text, outline: "none" }} />
+                      <button onClick={addTask} style={{ padding: "9px 16px", borderRadius: 8, border: "none", background: "#4AB069", color: "#fff", fontSize: 16, cursor: "pointer" }}>+</button>
+                    </div>
+                  </div>
+                </Section>
+              );
+            })()}
+
+            {/* Address */}
+            <div style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+              <div style={{ display: "flex", alignItems: "center", padding: "16px 0" }}>
+                <span style={{ width: 90, fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: C.accent, fontWeight: 400, flexShrink: 0 }}>Address</span>
+                <input value={p.address} onChange={e => upd("address", e.target.value)} placeholder="—"
+                  style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.text, fontSize: 14, fontWeight: 300, fontFamily: FONT, padding: 0 }} />
+              </div>
+            </div>
+
+            {/* Date */}
+            <div style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+              <div style={{ display: "flex", alignItems: "center", padding: "16px 0" }}>
+                <span style={{ width: 90, fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: C.accent, fontWeight: 400, flexShrink: 0 }}>Date</span>
+                <input type="date" value={p.calendar} onChange={e => upd("calendar", e.target.value)}
+                  style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: p.calendar ? C.text : "rgba(0,0,0,0.18)", fontSize: 14, fontWeight: 300, fontFamily: FONT, padding: 0, colorScheme: "light" }} />
+              </div>
+            </div>
+
+            {/* TIME TRACKER */}
+            <Section label="Time" accent={C.accent} textColor={C.text}
+              open={open.time} onToggle={() => tog("time")}
+              right={
+                <span style={{ fontSize: 13, fontWeight: 300, color: p.elapsedMs > 0 ? C.text : "rgba(0,0,0,0.2)" }}>
+                  {p.elapsedMs > 0 ? `${fmt(p.elapsedMs)} · ${(p.sessions||[]).length} sessions` : "—"}
+                </span>
+              }
+            >
+              <Stopwatch elapsedMs={p.elapsedMs} sessions={p.sessions} rate={p.rate} accent={C.accent} textColor={C.text}
+                onSave={data => setProjects(ps => ps.map(x => x.id !== active ? x : { ...x, ...data }))} />
+            </Section>
+
+            {/* MATERIAL */}
+            <Section label="Material" accent={C.accent} textColor={C.text}
+              open={open.material} onToggle={() => tog("material")}
+              right={
+                <span style={{ fontSize: 13, fontWeight: 300, color: "rgba(0,0,0,0.3)" }}>
+                  {(p.materials || []).length > 0 ? `${(p.materials).filter(m => m.checked).length}/${p.materials.length}` : "—"}
+                </span>
+              }
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {(p.materials || []).map(m => (
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                    <div onClick={() => toggleMat(m.id)} style={{
+                      width: 18, height: 18, borderRadius: 4, flexShrink: 0, cursor: "pointer",
+                      border: `1.5px solid ${m.checked ? C.accent : "rgba(0,0,0,0.2)"}`,
+                      background: m.checked ? C.accent : "transparent",
+                      display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s"
+                    }}>
+                      {m.checked && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                    </div>
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: 300, color: m.checked ? "rgba(0,0,0,0.3)" : C.text, textDecoration: m.checked ? "line-through" : "none" }}>{m.text}</span>
+                    <span onClick={() => removeMat(m.id)} style={{ fontSize: 16, color: "rgba(0,0,0,0.15)", cursor: "pointer", lineHeight: 1 }}>×</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input value={newMat} onChange={e => setNewMat(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addMaterial()}
+                    placeholder="Add item..."
+                    style={{ flex: 1, background: "rgba(0,0,0,0.05)", border: "none", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontWeight: 300, fontFamily: FONT, color: C.text, outline: "none" }} />
+                  <button onClick={addMaterial}
+                    style={{ padding: "9px 16px", borderRadius: 8, border: "none", background: C.accent, color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 300 }}>+</button>
+                </div>
+              </div>
+            </Section>
+
+            {/* IMPORTANT */}
+            <Section label="Important" accent={C.accent} textColor={C.text}
+              open={open.important} onToggle={() => tog("important")}
+              right={
+                <span style={{ fontSize: 13, fontWeight: 300, color: "rgba(0,0,0,0.3)" }}>
+                  {(p.importantItems||[]).length > 0 ? `${(p.importantItems||[]).length} item${(p.importantItems||[]).length !== 1 ? "s" : ""}` : "—"}
+                </span>
+              }
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {(p.importantItems || []).map((item, i) => (
+                  <div key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.accent, flexShrink: 0, marginTop: 5 }} />
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: 300, color: C.text, lineHeight: 1.5 }}>{item.text}</span>
+                    <span onClick={() => removeImp(item.id)} style={{ fontSize: 16, color: "rgba(0,0,0,0.15)", cursor: "pointer", lineHeight: 1, flexShrink: 0 }}>×</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input value={newImp} onChange={e => setNewImp(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addImp()}
+                    placeholder="Add important item..."
+                    style={{ flex: 1, background: "rgba(0,0,0,0.05)", border: "none", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontWeight: 300, fontFamily: FONT, color: C.text, outline: "none" }} />
+                  <button onClick={addImp}
+                    style={{ padding: "9px 16px", borderRadius: 8, border: "none", background: C.accent, color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 300 }}>+</button>
+                </div>
+              </div>
+            </Section>
+
+            {/* PHOTOS */}
+            <Section label="Photos" accent={C.accent} textColor={C.text}
+              open={open.photos} onToggle={() => tog("photos")}
+              right={
+                <span style={{ fontSize: 13, fontWeight: 300, color: "rgba(0,0,0,0.3)" }}>
+                  {(p.photos || []).length > 0 ? `${p.photos.length} photo${p.photos.length !== 1 ? "s" : ""}` : "—"}
+                </span>
+              }
+            >
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                {(p.photos || []).map(ph => (
+                  <div key={ph.id} style={{ position: "relative", width: 80, height: 80 }}>
+                    <img src={ph.src} alt={ph.name} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 10 }} />
+                    <button onClick={() => upd("photos", p.photos.filter(x => x.id !== ph.id))}
+                      style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none", color: "#fff", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>×</button>
+                  </div>
+                ))}
+              </div>
+              <label style={{
+                display: "inline-flex", alignItems: "center", gap: 8,
+                padding: "10px 18px", borderRadius: 10, cursor: "pointer",
+                background: "rgba(0,0,0,0.06)", fontSize: 12, fontWeight: 400,
+                color: C.text, letterSpacing: 1
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                </svg>
+                Upload photos
+                <input type="file" accept="image/*" multiple onChange={handlePhoto} style={{ display: "none" }} />
+              </label>
+              <p style={{ fontSize: 9, color: "rgba(0,0,0,0.2)", marginTop: 8, letterSpacing: 1 }}>Max 800KB per photo</p>
+            </Section>
+
+            {/* DONE */}
+            <Section label="Done" accent={C.accent} textColor={C.text}
+              open={open.done} onToggle={() => tog("done")}
+              right={
+                <span style={{ fontSize: 13, fontWeight: 300, color: "rgba(0,0,0,0.3)" }}>
+                  {(p.doneItems||[]).length > 0 ? `${(p.doneItems||[]).length} completed` : "—"}
+                </span>
+              }
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {(p.doneItems || []).length === 0 && (
+                  <p style={{ fontSize: 12, fontWeight: 300, color: "rgba(0,0,0,0.25)", margin: "0 0 8px", letterSpacing: 0.3 }}>Log completed tasks as you finish them.</p>
+                )}
+                {[...(p.doneItems || [])].reverse().map(item => (
+                  <div key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                    <div style={{ flexShrink: 0, marginTop: 2 }}>
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <circle cx="7" cy="7" r="6.25" stroke={C.accent} strokeWidth="1.5" fill={C.accent + "22"} />
+                        <path d="M4 7l2 2 4-4" stroke={C.accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: 13, fontWeight: 300, color: C.text, lineHeight: 1.5 }}>{item.text}</span>
+                      {item.date && <div style={{ fontSize: 9, color: "rgba(0,0,0,0.3)", letterSpacing: 1, marginTop: 2 }}>{item.date}</div>}
+                    </div>
+                    <span onClick={() => removeDoneItem(item.id)} style={{ fontSize: 16, color: "rgba(0,0,0,0.15)", cursor: "pointer", lineHeight: 1, flexShrink: 0 }}>×</span>
+                  </div>
+                ))}
+
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input value={newDone} onChange={e => setNewDone(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addDoneItem()}
+                    placeholder="What did you complete?"
+                    style={{ flex: 1, background: "rgba(0,0,0,0.05)", border: "none", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontWeight: 300, fontFamily: FONT, color: C.text, outline: "none" }} />
+                  <button onClick={addDoneItem}
+                    style={{ padding: "9px 16px", borderRadius: 8, border: "none", background: C.accent, color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 300 }}>+</button>
+                </div>
+
+                {/* Project complete toggle */}
+                {(p.doneItems||[]).length > 0 && (
+                  <div style={{ marginTop: 16, padding: "14px 16px", background: p.projectDone ? C.accent + "22" : "rgba(0,0,0,0.04)", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 500, color: p.projectDone ? C.accent : "rgba(0,0,0,0.3)", letterSpacing: 2, textTransform: "uppercase" }}>
+                        {p.projectDone ? "✓ Project Complete" : "Mark Project Complete"}
+                      </div>
+                      {p.projectDone && p.doneDate && (
+                        <div style={{ fontSize: 11, fontWeight: 300, color: "rgba(0,0,0,0.4)", marginTop: 3 }}>{p.doneDate}</div>
+                      )}
+                    </div>
+                    <Toggle on={p.projectDone} accent={C.accent} onChange={() => {
+                      const now = !p.projectDone;
+                      upd("projectDone", now);
+                      if (now) upd("doneDate", new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }));
+                      else upd("doneDate", "");
+                    }} />
+                  </div>
+                )}
+              </div>
+            </Section>
+
+            {/* Notes */}
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: C.accent, marginBottom: 10 }}>Notes</div>
+              <textarea value={p.notes} onChange={e => upd("notes", e.target.value)} placeholder="—" rows={3}
+                style={{ background: "transparent", border: "none", outline: "none", color: C.text, fontSize: 13, fontWeight: 300, fontFamily: FONT, width: "100%", resize: "none", padding: 0, lineHeight: 1.9 }} />
+            </div>
+
+          </div>
+        )}
+      </div>
+
+      {/* ── TABS ── */}
+      <div style={{
+        position: "fixed", right: 0, top: 0, bottom: 0, width: 52,
+        borderLeft: "1px solid rgba(0,0,0,0.07)",
+        background: "#F0ECE4",
+        display: "flex", flexDirection: "column", zIndex: 20, overflowY: "auto"
+      }}>
+        {/* Sort button */}
+        <button
+          onClick={() => setSortMode(m => m === "added" ? "priority" : m === "priority" ? "progress" : "added")}
+          style={{
+            height: 40, border: "none", borderBottom: "1px solid rgba(0,0,0,0.07)",
+            background: "transparent", cursor: "pointer", flexShrink: 0,
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1,
+            padding: 0,
+          }}>
+          <span style={{ fontSize: 7, letterSpacing: 1, textTransform: "uppercase", color: "rgba(0,0,0,0.3)", fontFamily: FONT }}>
+            {sortMode === "added" ? "A-Z" : sortMode === "priority" ? "⚑" : "%"}
+          </span>
+          <span style={{ fontSize: 6, letterSpacing: 0.5, textTransform: "uppercase", color: "rgba(0,0,0,0.2)", fontFamily: FONT }}>
+            {sortMode}
+          </span>
+        </button>
+
+        {sortedProjects.map(proj => {
+          const PC = COLORS[proj.colorIndex % COLORS.length];
+          const isActive = active === proj.id;
+          const pct = calcProgress(proj);
+
+          return (
+            <button key={proj.id} onClick={() => { setActive(isActive ? null : proj.id); setOpen({}); }}
+              style={{
+                flex: 1, minHeight: 68, border: "none",
+                borderBottom: "1px solid rgba(255,255,255,0.5)",
+                borderLeft: isActive ? `3px solid ${PC.accent}` : "3px solid transparent",
+                background: PC.bg,
+                cursor: "pointer", display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "flex-end",
+                padding: 0, transition: "all 0.25s", position: "relative",
+                overflow: "hidden",
+              }}>
+
+              {/* Green fill from bottom */}
+              <div style={{
+                position: "absolute", bottom: 0, left: 0, right: 0,
+                height: `${pct}%`,
+                background: proj.projectDone ? "rgba(60,160,80,0.35)" : "rgba(60,160,80,0.22)",
+                transition: "height 0.6s cubic-bezier(0.34,1.56,0.64,1)",
+              }} />
+
+              {/* % label */}
+              {pct > 0 && (
+                <div style={{
+                  position: "absolute", top: 5, left: 0, right: 0,
+                  textAlign: "center", fontSize: 7, fontWeight: 600,
+                  color: proj.projectDone ? "rgba(40,120,60,0.9)" : PC.accent,
+                  fontFamily: FONT,
+                }}>
+                  {pct}%
+                </div>
+              )}
+
+              {/* Name */}
+              <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, paddingBottom: 10, paddingTop: 10 }}>
+                <div style={{ width: 5, height: 5, borderRadius: "50%", background: isActive ? PC.accent : PC.accent + "66" }} />
+                <span style={{
+                  writingMode: "vertical-rl", transform: "rotate(180deg)",
+                  fontSize: 10, fontWeight: isActive ? 500 : 300,
+                  color: isActive ? PC.accent : PC.text + "99",
+                  fontFamily: FONT, letterSpacing: 2, transition: "all 0.25s"
+                }}>
+                  {proj.name}
+                </span>
+              </div>
+
+              {proj.projectDone && (
+                <div style={{ position: "absolute", bottom: 4, right: 4, fontSize: 8, color: "rgba(40,120,60,0.8)" }}>✓</div>
+              )}
+            </button>
+          );
+        })}
+        <button onClick={addNew}
+          style={{ height: 48, border: "none", borderTop: "1px solid rgba(0,0,0,0.07)", background: "transparent", cursor: "pointer", color: "rgba(0,0,0,0.3)", fontSize: 20, fontWeight: 200, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontFamily: FONT }}>
+          +
+        </button>
+      </div>
+
+      {/* ── WAITING COUNTER ── */}
+      {(() => {
+        const waiting = projects.filter(q => calcProgress(q) === 0 && !q.projectDone);
+        if ((waiting.length === 0 && completedCount === 0) || p) return null;
+        return (
+          <>
+            <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet" />
+            <div style={{
+              position: "fixed", bottom: 20, left: 20,
+              userSelect: "none", display: "flex",
+              alignItems: "flex-end", gap: 12, zIndex: 15,
+            }}>
+              {/* Orange — waiting */}
+              {waiting.length > 0 && (
+                <span
+                  onClick={() => setWaitingOpen(true)}
+                  style={{
+                    fontSize: 160, lineHeight: 0.85,
+                    fontFamily: "'Bebas Neue', sans-serif", fontWeight: 400,
+                    background: "linear-gradient(135deg, #E8430A 0%, #F5A500 100%)",
+                    WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                    backgroundClip: "text", letterSpacing: -4,
+                    filter: "drop-shadow(0px 4px 12px rgba(232,67,10,0.25))",
+                    display: "block", transform: "scaleY(1.6)", transformOrigin: "bottom",
+                    cursor: "pointer",
+                  }}>
+                  {waiting.length}
+                </span>
+              )}
+
+              {/* Blue — completed */}
+              {completedCount > 0 && (
+                <span style={{
+                  fontSize: 80, lineHeight: 0.85,
+                  fontFamily: "'Bebas Neue', sans-serif", fontWeight: 400,
+                  background: "linear-gradient(135deg, #1A4BF5 0%, #06B6D4 100%)",
+                  WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                  backgroundClip: "text", letterSpacing: -2,
+                  filter: "drop-shadow(0px 4px 16px rgba(26,75,245,0.35))",
+                  display: "block", transform: "scaleY(1.6)", transformOrigin: "bottom",
+                }}>
+                  {completedCount}
+                </span>
+              )}
+            </div>
+          </>
+        );
+      })()}
+
+      {/* ── WAITING MODAL ── */}
+      {waitingOpen && (
+        <div onClick={() => setWaitingOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 50, display: "flex", alignItems: "flex-end", backdropFilter: "blur(4px)" }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "#F8F4EE", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 480, padding: "24px 24px 40px", animation: "appear 0.25s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: "rgba(0,0,0,0.3)", marginBottom: 4 }}>Jobs</div>
+                <div style={{ fontSize: 20, fontWeight: 600, color: "rgba(0,0,0,0.7)", letterSpacing: -0.5 }}>Waiting to Start</div>
+              </div>
+              <button onClick={() => setWaitingOpen(false)}
+                style={{ background: "rgba(0,0,0,0.08)", border: "none", borderRadius: "50%", width: 30, height: 30, cursor: "pointer", fontSize: 16, color: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+            </div>
+            {sortedProjects.filter(q => calcProgress(q) === 0 && !q.projectDone).map(proj => {
+              const PC = COLORS[proj.colorIndex % COLORS.length];
+              return (
+                <div key={proj.id}
+                  onClick={() => { setActive(proj.id); setOpen({}); setWaitingOpen(false); }}
+                  style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", marginBottom: 8, background: PC.bg, borderRadius: 14, cursor: "pointer" }}>
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: PC.accent, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                      <span style={{ fontSize: 18, fontWeight: 700, color: PC.accent, letterSpacing: -0.5 }}>{proj.name[0]}</span>
+                      <span style={{ fontSize: 11, fontWeight: 300, color: PC.text, letterSpacing: 3, textTransform: "uppercase", opacity: 0.6 }}>{proj.name.slice(1)}</span>
+                    </div>
+                    {proj.address && <div style={{ fontSize: 11, fontWeight: 300, color: "rgba(0,0,0,0.4)", marginTop: 2 }}>{proj.address}</div>}
+                  </div>
+                  <span style={{ fontSize: 18, color: "rgba(0,0,0,0.15)" }}>›</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+
+
+      <style>{`
+        @keyframes appear { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes expand { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+        * { box-sizing: border-box; }
+        input::placeholder, textarea::placeholder { color: rgba(0,0,0,0.15); }
+        input[type=number]::-webkit-inner-spin-button { display:none; }
+        ::-webkit-scrollbar { width:0; }
+      `}</style>
+    </div>
+  );
+}
