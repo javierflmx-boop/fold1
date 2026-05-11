@@ -1,22 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-  <title>FOLD</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { overflow-x: hidden; }
-  </style>
-</head>
-<body>
-  <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
-
+import { useState, useEffect, useRef } from "react";
 
 const FONT = "'Outfit', sans-serif";
 
@@ -98,88 +80,54 @@ function Section({ label, accent, textColor, open, onToggle, right, children }) 
   );
 }
 
-/* ── Stopwatch with session log + earnings ── */
-function Stopwatch({ elapsedMs, sessions, rate, accent, textColor, onSave }) {
-  const [running, setRunning] = useState(false);
-  const [current, setCurrent] = useState(0); // current session ms
-  const startRef = useRef(null);
-  const rafRef = useRef(null);
+/* ── Manual Hours Logger ── */
+function HoursLogger({ sessions, rate, accent, textColor, onSave }) {
+  const [hoursInput, setHoursInput] = useState("");
 
-  function tick() {
-    setCurrent(Date.now() - startRef.current);
-    rafRef.current = requestAnimationFrame(tick);
-  }
+  const totalHrs = (sessions || []).reduce((acc, s) => acc + s.hrs, 0);
+  const earnings = rate && totalHrs > 0 ? totalHrs * parseFloat(rate || 0) : 0;
 
-  function start() {
-    startRef.current = Date.now();
-    setRunning(true);
-    rafRef.current = requestAnimationFrame(tick);
-  }
-
-  function pause() {
-    cancelAnimationFrame(rafRef.current);
-    const sessionMs = Date.now() - startRef.current;
-    if (sessionMs < 1000) { setRunning(false); setCurrent(0); return; }
+  function addSession() {
+    const hrs = parseFloat(hoursInput);
+    if (!hrs || hrs <= 0) return;
     const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-    const newSession = { id: Date.now(), date: today, ms: sessionMs };
+    const newSession = { id: Date.now(), date: today, hrs };
     const newSessions = [...(sessions || []), newSession];
-    const newTotal = (elapsedMs || 0) + sessionMs;
-    onSave({ elapsedMs: newTotal, sessions: newSessions });
-    setCurrent(0);
-    setRunning(false);
+    onSave({ sessions: newSessions, elapsedMs: newSessions.reduce((a, s) => a + s.hrs, 0) * 3600000 });
+    setHoursInput("");
   }
 
   function removeSession(id) {
     const updated = (sessions || []).filter(s => s.id !== id);
-    const newTotal = updated.reduce((acc, s) => acc + s.ms, 0);
-    onSave({ elapsedMs: newTotal, sessions: updated });
+    onSave({ sessions: updated, elapsedMs: updated.reduce((a, s) => a + s.hrs, 0) * 3600000 });
   }
-
-  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
-
-  const displayMs = running ? current : 0;
-  const h = Math.floor(displayMs / 3600000);
-  const m = Math.floor((displayMs % 3600000) / 60000);
-  const s = Math.floor((displayMs % 60000) / 1000);
-
-  const totalHrs = (elapsedMs || 0) / 3600000;
-  const earnings = rate ? (totalHrs * parseFloat(rate || 0)) : 0;
 
   return (
     <div style={{ paddingTop: 4 }}>
 
-      {/* Live clock — shows current session only */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 2, marginBottom: 6 }}>
-        {[{val: h, label:"hr"},{val: m, label:"min"},{val: s, label:"sec"}].map(({val, label}, i) => (
-          <div key={label} style={{ display: "flex", alignItems: "baseline", gap: 2 }}>
-            {i > 0 && <span style={{ fontSize: 24, fontWeight: 200, color: "rgba(0,0,0,0.15)", margin: "0 2px" }}>:</span>}
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 44, fontWeight: 600, color: running ? textColor : "rgba(0,0,0,0.15)", lineHeight: 1, letterSpacing: -2, fontVariantNumeric: "tabular-nums", transition: "color 0.3s" }}>
-                {String(val).padStart(2, "0")}
-              </div>
-              <div style={{ fontSize: 7, letterSpacing: 3, textTransform: "uppercase", color: accent, marginTop: 2 }}>{label}</div>
-            </div>
-          </div>
-        ))}
+      {/* Add hours today */}
+      <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, marginBottom: 8 }}>Log Today's Hours</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <input
+          type="number"
+          value={hoursInput}
+          onChange={e => setHoursInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addSession()}
+          placeholder="0.0"
+          style={{
+            flex: 1, background: "rgba(0,0,0,0.05)", border: "none", borderRadius: 10,
+            padding: "10px 14px", fontSize: 16, fontWeight: 500, color: textColor,
+            fontFamily: FONT, outline: "none",
+          }}
+        />
+        <button onClick={addSession} style={{
+          width: 44, borderRadius: 10, border: "none",
+          background: accent, color: "#fff", fontSize: 20,
+          cursor: "pointer", fontWeight: 300, flexShrink: 0,
+        }}>+</button>
       </div>
 
-      {running && (
-        <div style={{ fontSize: 9, color: accent, letterSpacing: 2, textTransform: "uppercase", marginBottom: 12 }}>● Recording session...</div>
-      )}
-
-      {/* Controls */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
-        <button onClick={running ? pause : start} style={{
-          flex: 1, padding: "11px 0", borderRadius: 10, border: "none",
-          background: running ? accent : "rgba(0,0,0,0.08)",
-          color: running ? "#fff" : textColor, fontSize: 10, fontWeight: 500,
-          fontFamily: FONT, letterSpacing: 2, textTransform: "uppercase", cursor: "pointer", transition: "all 0.2s"
-        }}>
-          {running ? "Stop & Save" : "Start Session"}
-        </button>
-      </div>
-
-      {/* Rate input */}
+      {/* Rate */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(0,0,0,0.05)", borderRadius: 10, marginBottom: 20 }}>
         <span style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, whiteSpace: "nowrap" }}>$/hr</span>
         <input
@@ -190,53 +138,40 @@ function Stopwatch({ elapsedMs, sessions, rate, accent, textColor, onSave }) {
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: textColor, fontSize: 16, fontWeight: 400, fontFamily: FONT, padding: 0 }}
         />
         {earnings > 0 && (
-          <span style={{ fontSize: 14, fontWeight: 500, color: accent, whiteSpace: "nowrap" }}>
-            = ${earnings.toFixed(2)}
-          </span>
+          <span style={{ fontSize: 14, fontWeight: 500, color: accent, whiteSpace: "nowrap" }}>= ${earnings.toFixed(2)}</span>
         )}
       </div>
 
-      {/* Total summary */}
-      {(elapsedMs || 0) > 0 && (
-        <div style={{ padding: "14px 16px", background: accent + "18", borderRadius: 12, marginBottom: 20 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, marginBottom: 4 }}>Total Time</div>
-              <div style={{ fontSize: 22, fontWeight: 600, color: textColor, letterSpacing: -0.5 }}>{fmt(elapsedMs)}</div>
-              <div style={{ fontSize: 11, fontWeight: 300, color: "rgba(0,0,0,0.4)", marginTop: 2 }}>
-                {totalHrs.toFixed(1)} hrs · {(sessions||[]).length} session{(sessions||[]).length !== 1 ? "s" : ""}
-              </div>
-            </div>
-            {earnings > 0 && (
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, marginBottom: 4 }}>Earnings</div>
-                <div style={{ fontSize: 22, fontWeight: 600, color: accent }}>${earnings.toFixed(2)}</div>
-                <div style={{ fontSize: 11, fontWeight: 300, color: "rgba(0,0,0,0.4)", marginTop: 2 }}>${parseFloat(rate).toFixed(0)}/hr</div>
-              </div>
-            )}
+      {/* Summary */}
+      {totalHrs > 0 && (
+        <div style={{ padding: "14px 16px", background: accent + "18", borderRadius: 12, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, marginBottom: 4 }}>Total Hours</div>
+            <div style={{ fontSize: 28, fontWeight: 700, color: textColor, letterSpacing: -1 }}>{totalHrs.toFixed(1)} hrs</div>
+            <div style={{ fontSize: 11, fontWeight: 300, color: "rgba(0,0,0,0.4)", marginTop: 2 }}>{(sessions||[]).length} days logged</div>
           </div>
+          {earnings > 0 && (
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, marginBottom: 4 }}>Earnings</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: accent }}>${earnings.toFixed(2)}</div>
+              <div style={{ fontSize: 11, fontWeight: 300, color: "rgba(0,0,0,0.4)", marginTop: 2 }}>${parseFloat(rate).toFixed(0)}/hr</div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Session log */}
+      {/* Daily log */}
       {(sessions || []).length > 0 && (
         <div>
-          <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, marginBottom: 10 }}>Session Log</div>
-          {[...(sessions || [])].reverse().map((sess, i) => (
-            <div key={sess.id} style={{
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "10px 0", borderBottom: "1px solid rgba(0,0,0,0.05)"
-            }}>
+          <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: accent, marginBottom: 10 }}>Daily Log</div>
+          {[...(sessions || [])].reverse().map(sess => (
+            <div key={sess.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 400, color: textColor }}>{sess.date}</div>
-                <div style={{ fontSize: 10, fontWeight: 300, color: "rgba(0,0,0,0.35)", marginTop: 2 }}>{fmt(sess.ms)}</div>
+                <div style={{ fontSize: 12, fontWeight: 400, color: textColor }}>{sess.date}</div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                {rate && (
-                  <span style={{ fontSize: 12, fontWeight: 400, color: accent }}>
-                    ${((sess.ms / 3600000) * parseFloat(rate)).toFixed(2)}
-                  </span>
-                )}
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <span style={{ fontSize: 16, fontWeight: 600, color: textColor }}>{sess.hrs} hrs</span>
+                {rate && <span style={{ fontSize: 12, color: accent }}>${(sess.hrs * parseFloat(rate)).toFixed(2)}</span>}
                 <span onClick={() => removeSession(sess.id)} style={{ fontSize: 16, color: "rgba(0,0,0,0.15)", cursor: "pointer" }}>×</span>
               </div>
             </div>
@@ -247,7 +182,7 @@ function Stopwatch({ elapsedMs, sessions, rate, accent, textColor, onSave }) {
   );
 }
 
-function App() {
+export default function App() {
   const [projects, setProjects] = useState(DEFAULTS);
   const [active, setActive] = useState(null);
   const [open, setOpen] = useState({});
@@ -255,6 +190,8 @@ function App() {
   const [tmpName, setTmpName] = useState("");
   const [waitingOpen, setWaitingOpen] = useState(false);
   const [sortMode, setSortMode] = useState("added");
+  const [quickLog, setQuickLog] = useState(null); // { id, hrs }
+  const [quickHrs, setQuickHrs] = useState("");
   const [completedCount, setCompletedCount] = useState(() => {
     try { return parseInt(localStorage.getItem("lf-completed") || "0"); } catch { return 0; }
   });
@@ -367,6 +304,20 @@ function App() {
     setOpen({});
   }
 
+  function saveQuickLog() {
+    const hrs = parseFloat(quickHrs);
+    if (!hrs || hrs <= 0) { setQuickLog(null); setQuickHrs(""); return; }
+    const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const newSession = { id: Date.now(), date: today, hrs };
+    setProjects(ps => ps.map(x => {
+      if (x.id !== quickLog) return x;
+      const newSessions = [...(x.sessions || []), newSession];
+      return { ...x, sessions: newSessions, elapsedMs: newSessions.reduce((a, s) => a + s.hrs, 0) * 3600000 };
+    }));
+    setQuickLog(null);
+    setQuickHrs("");
+  }
+
   function remove(id) {
     setProjects(ps => ps.filter(x => x.id !== id));
     setActive(null);
@@ -391,7 +342,7 @@ function App() {
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600&display=swap" rel="stylesheet" />
 
       {/* ── MAIN ── */}
-      <div style={{ flex: 1, marginRight: 48, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+      <div style={{ flex: 1, marginRight: 72, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
 
         {/* Top bar */}
         <div style={{ padding: "28px 32px 0", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
@@ -574,11 +525,11 @@ function App() {
               open={open.time} onToggle={() => tog("time")}
               right={
                 <span style={{ fontSize: 13, fontWeight: 300, color: p.elapsedMs > 0 ? C.text : "rgba(0,0,0,0.2)" }}>
-                  {p.elapsedMs > 0 ? `${fmt(p.elapsedMs)} · ${(p.sessions||[]).length} sessions` : "—"}
+                  {p.sessions && p.sessions.length > 0 ? `${p.sessions.reduce((a,s) => a + s.hrs, 0).toFixed(1)} hrs · ${p.sessions.length} days` : "—"}
                 </span>
               }
             >
-              <Stopwatch elapsedMs={p.elapsedMs} sessions={p.sessions} rate={p.rate} accent={C.accent} textColor={C.text}
+              <HoursLogger elapsedMs={p.elapsedMs} sessions={p.sessions} rate={p.rate} accent={C.accent} textColor={C.text}
                 onSave={data => setProjects(ps => ps.map(x => x.id !== active ? x : { ...x, ...data }))} />
             </Section>
 
@@ -751,7 +702,7 @@ function App() {
 
       {/* ── TABS ── */}
       <div style={{
-        position: "fixed", right: 0, top: 0, bottom: 0, width: 52,
+        position: "fixed", right: 0, top: 0, bottom: 0, width: 72,
         borderLeft: "1px solid rgba(0,0,0,0.07)",
         background: "#F0ECE4",
         display: "flex", flexDirection: "column", zIndex: 20, overflowY: "auto"
@@ -777,61 +728,109 @@ function App() {
           const PC = COLORS[proj.colorIndex % COLORS.length];
           const isActive = active === proj.id;
           const pct = calcProgress(proj);
+          const isLogging = quickLog === proj.id;
+
+          let touchStartX = 0;
 
           return (
-            <button key={proj.id} onClick={() => { setActive(isActive ? null : proj.id); setOpen({}); }}
-              style={{
-                flex: 1, minHeight: 68, border: "none",
-                borderBottom: "1px solid rgba(255,255,255,0.5)",
-                borderLeft: isActive ? `3px solid ${PC.accent}` : "3px solid transparent",
-                background: PC.bg,
-                cursor: "pointer", display: "flex", flexDirection: "column",
-                alignItems: "center", justifyContent: "flex-end",
-                padding: 0, transition: "all 0.25s", position: "relative",
-                overflow: "hidden",
-              }}>
+            <div key={proj.id} style={{ flex: 1, minHeight: 68, position: "relative", overflow: "visible" }}>
 
-              {/* Green fill from bottom */}
+              {/* Slide-out quick log panel */}
               <div style={{
-                position: "absolute", bottom: 0, left: 0, right: 0,
-                height: `${pct}%`,
-                background: proj.projectDone ? "rgba(60,160,80,0.35)" : "rgba(60,160,80,0.22)",
-                transition: "height 0.6s cubic-bezier(0.34,1.56,0.64,1)",
-              }} />
-
-              {/* % label */}
-              {pct > 0 && (
+                position: "absolute", right: 72, top: 0, bottom: 0,
+                width: isLogging ? 200 : 0,
+                overflow: "hidden",
+                transition: "width 0.35s cubic-bezier(0.34,1.56,0.64,1)",
+                zIndex: 30,
+              }}>
                 <div style={{
-                  position: "absolute", top: 5, left: 0, right: 0,
-                  textAlign: "center", fontSize: 7, fontWeight: 600,
-                  color: proj.projectDone ? "rgba(40,120,60,0.9)" : PC.accent,
-                  fontFamily: FONT,
+                  width: 200, height: "100%",
+                  background: PC.bg,
+                  borderLeft: `3px solid ${PC.accent}`,
+                  display: "flex", flexDirection: "column",
+                  alignItems: "center", justifyContent: "center",
+                  padding: "0 14px", gap: 8,
                 }}>
-                  {pct}%
+                  <div style={{ fontSize: 9, letterSpacing: 3, textTransform: "uppercase", color: PC.accent, fontFamily: FONT }}>{proj.name}</div>
+                  <div style={{ display: "flex", gap: 8, width: "100%" }}>
+                    <input
+                      autoFocus={isLogging}
+                      type="number"
+                      value={quickHrs}
+                      onChange={e => setQuickHrs(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") saveQuickLog(); if (e.key === "Escape") { setQuickLog(null); setQuickHrs(""); } }}
+                      placeholder="hrs"
+                      style={{
+                        flex: 1, background: "rgba(0,0,0,0.08)", border: "none",
+                        borderRadius: 10, padding: "10px 12px", fontSize: 20,
+                        fontWeight: 600, color: PC.text, fontFamily: FONT,
+                        outline: "none",
+                      }}
+                    />
+                    <button onClick={saveQuickLog} style={{
+                      width: 44, borderRadius: 10, border: "none",
+                      background: PC.accent, color: "#fff",
+                      fontSize: 20, cursor: "pointer", flexShrink: 0,
+                    }}>✓</button>
+                  </div>
                 </div>
-              )}
-
-              {/* Name */}
-              <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, paddingBottom: 10, paddingTop: 10 }}>
-                <div style={{ width: 5, height: 5, borderRadius: "50%", background: isActive ? PC.accent : PC.accent + "66" }} />
-                <span style={{
-                  writingMode: "vertical-rl", transform: "rotate(180deg)",
-                  fontSize: 10, fontWeight: isActive ? 500 : 300,
-                  color: isActive ? PC.accent : PC.text + "99",
-                  fontFamily: FONT, letterSpacing: 2, transition: "all 0.25s"
-                }}>
-                  {proj.name}
-                </span>
               </div>
 
-              {proj.projectDone && (
-                <div style={{ position: "absolute", bottom: 4, right: 4, fontSize: 8, color: "rgba(40,120,60,0.8)" }}>✓</div>
-              )}
-            </button>
+              {/* Tab button — swipe left to log hours */}
+              <button
+                onClick={() => { setActive(isActive ? null : proj.id); setOpen({}); setQuickLog(null); setQuickHrs(""); }}
+                onTouchStart={e => { touchStartX = e.touches[0].clientX; }}
+                onTouchEnd={e => {
+                  const dx = e.changedTouches[0].clientX - touchStartX;
+                  if (dx < -40) { e.stopPropagation(); setQuickLog(isLogging ? null : proj.id); setQuickHrs(""); }
+                  else if (dx > 40) { setQuickLog(null); setQuickHrs(""); }
+                }}
+                style={{
+                  width: "100%", height: "100%", border: "none",
+                  borderBottom: "1px solid rgba(255,255,255,0.5)",
+                  borderLeft: isActive ? `3px solid ${PC.accent}` : "3px solid transparent",
+                  background: PC.bg,
+                  cursor: "pointer", display: "flex", flexDirection: "column",
+                  alignItems: "center", justifyContent: "flex-end",
+                  padding: 0, transition: "all 0.25s", position: "relative",
+                  overflow: "hidden",
+                }}>
+
+                {/* Green fill */}
+                <div style={{
+                  position: "absolute", bottom: 0, left: 0, right: 0,
+                  height: `${pct}%`,
+                  background: proj.projectDone ? "rgba(60,160,80,0.35)" : "rgba(60,160,80,0.22)",
+                  transition: "height 0.6s cubic-bezier(0.34,1.56,0.64,1)",
+                }} />
+
+                {pct > 0 && (
+                  <div style={{ position: "absolute", top: 5, left: 0, right: 0, textAlign: "center", fontSize: 7, fontWeight: 600, color: proj.projectDone ? "rgba(40,120,60,0.9)" : PC.accent, fontFamily: FONT }}>
+                    {pct}%
+                  </div>
+                )}
+
+                <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, paddingBottom: 10, paddingTop: 10 }}>
+                  <div style={{ width: 5, height: 5, borderRadius: "50%", background: isActive ? PC.accent : PC.accent + "66" }} />
+                  <span style={{
+                    writingMode: "vertical-rl", transform: "rotate(180deg)",
+                    fontSize: 10, fontWeight: isActive ? 500 : 300,
+                    color: isActive ? PC.accent : PC.text + "99",
+                    fontFamily: FONT, letterSpacing: 2, transition: "all 0.25s"
+                  }}>
+                    {proj.name}
+                  </span>
+                </div>
+
+                {proj.projectDone && (
+                  <div style={{ position: "absolute", bottom: 4, right: 4, fontSize: 8, color: "rgba(40,120,60,0.8)" }}>✓</div>
+                )}
+              </button>
+            </div>
           );
         })}
         <button onClick={addNew}
-          style={{ height: 48, border: "none", borderTop: "1px solid rgba(0,0,0,0.07)", background: "transparent", cursor: "pointer", color: "rgba(0,0,0,0.3)", fontSize: 20, fontWeight: 200, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontFamily: FONT }}>
+          style={{ height: 72, border: "none", borderTop: "1px solid rgba(0,0,0,0.07)", background: "transparent", cursor: "pointer", color: "rgba(0,0,0,0.3)", fontSize: 28, fontWeight: 200, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontFamily: FONT }}>
           +
         </button>
       </div>
@@ -934,9 +933,3 @@ function App() {
     </div>
   );
 }
-
-
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-  </script>
-</body>
-</html>
