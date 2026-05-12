@@ -1,4 +1,19 @@
-import { useState, useEffect, useRef } from "react";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>FOLD</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.2/babel.min.js"></script>
+  <style>* { margin:0; padding:0; box-sizing:border-box; } body { overflow-x:hidden; }</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef } = React;
+
 
 const FONT = "'Outfit', sans-serif";
 
@@ -182,7 +197,7 @@ function HoursLogger({ sessions, rate, accent, textColor, onSave }) {
   );
 }
 
-export default function App() {
+function App() {
   const [projects, setProjects] = useState(DEFAULTS);
   const [active, setActive] = useState(null);
   const [open, setOpen] = useState({});
@@ -1217,3 +1232,9 @@ export default function App() {
     </div>
   );
 }
+
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
